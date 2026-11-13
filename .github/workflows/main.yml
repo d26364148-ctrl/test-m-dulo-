@@ -1,0 +1,82 @@
+name: Build Kernel Module (AOSP Clang 22.0.2 r596125)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'test_module/**'
+      - '.github/workflows/main.yml'
+
+jobs:
+  build-module:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Kernel Source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential ccache curl flex git libelf-dev libssl-dev lld python3 tar unzip zip
+
+      - name: Download AOSP Clang 22.0.2 (r596125)
+        run: |
+          mkdir -p $HOME/clang-r596125
+          curl -sL "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r596125.tar.gz" | tar -xz -C $HOME/clang-r596125
+          echo "$HOME/clang-r596125/bin" >> $GITHUB_PATH
+
+      - name: Verify Clang Version
+        run: |
+          clang --version
+          ld.lld --version
+
+      - name: Create Test Module Source (Fallback if folder not present)
+        run: |
+          if [ ! -d "test_module" ]; then
+            mkdir -p test_module
+            cat << 'EOF' > test_module/hello_test.c
+          #include <linux/init.h>
+          #include <linux/module.h>
+          #include <linux/kernel.h>
+
+          MODULE_LICENSE("GPL");
+          MODULE_AUTHOR("djfjfjfjjf");
+          MODULE_DESCRIPTION("Moto G30 sm6225 Test Module");
+
+          static int __init hello_init(void) {
+              pr_info("hello_test: modulo carregado via AOSP Clang 22.0.2!\n");
+              return 0;
+          }
+
+          static void __exit hello_exit(void) {
+              pr_info("hello_test: modulo finalizado.\n");
+          }
+
+          module_init(hello_init);
+          module_exit(hello_exit);
+          EOF
+
+            cat << 'EOF' > test_module/Makefile
+          obj-m += hello_test.o
+          EOF
+          fi
+
+      - name: Prepare Kernel Headers & Build Module
+        run: |
+          # Localiza o defconfig do caprip (Moto G30) na árvore
+          DEFCONFIG=$(find arch/arm64/configs -name "*caprip*defconfig" | sed 's|arch/arm64/configs/||' | head -n 1)
+          echo "Usando defconfig: $DEFCONFIG"
+
+          make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 $DEFCONFIG
+          make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 modules_prepare
+          make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 M=test_module modules
+
+      - name: Upload Compiled .ko Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: moto-g30-kernel-module
+          path: out/test_module/*.ko
+          if-no-files-found: error
