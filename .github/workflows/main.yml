@@ -29,7 +29,6 @@ jobs:
           cd $HOME/aosp-clang
           git sparse-checkout set clang-r596125
           
-          # Adiciona o diretório bin do Clang oficial ao PATH do GitHub Actions
           echo "$HOME/aosp-clang/clang-r596125/bin" >> $GITHUB_PATH
 
       - name: Verify Official Clang Version
@@ -69,7 +68,16 @@ jobs:
 
       - name: Prepare Kernel Headers & Build Module with LLVM
         run: |
-          DEFCONFIG=$(find arch/arm64/configs -name "*caprip*defconfig" | sed 's|arch/arm64/configs/||' | head -n 1)
+          echo "Procurando defconfig do bengal-perf..."
+          CONFIG_PATH=$(find arch/arm64/configs -name "bengal-perf_defconfig" -o -name "*bengal-perf*defconfig" | head -n 1)
+          
+          if [ -z "$CONFIG_PATH" ]; then
+            echo "Erro crítico: Nenhum defconfig 'bengal-perf_defconfig' foi encontrado!"
+            find arch/arm64/configs -maxdepth 3
+            exit 1
+          fi
+
+          DEFCONFIG=$(echo "$CONFIG_PATH" | sed 's|arch/arm64/configs/||')
           echo "Usando defconfig: $DEFCONFIG"
 
           # Compilação estrita com LLVM=1 e LLVM_IAS=1 usando o Clang oficial r596125 do Google
