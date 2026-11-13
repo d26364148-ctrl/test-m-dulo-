@@ -1,4 +1,4 @@
-name: Build Kernel Module (AOSP Clang 22.0.2 r596125)
+name: Build Kernel Module (Ubuntu Clang & GCC)
 
 on:
   workflow_dispatch:
@@ -17,21 +17,15 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Install Build Dependencies
+      - name: Install Build Dependencies & Toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison build-essential ccache curl flex git libelf-dev libssl-dev lld python3 tar unzip zip
+          sudo apt-get install -y bc bison build-essential ccache curl flex git libelf-dev libssl-dev lld clang gcc-aarch64-linux-gnu
 
-      - name: Download AOSP Clang 22.0.2 (r596125)
-        run: |
-          mkdir -p $HOME/clang-r596125
-          curl -sL "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r596125.tar.gz" | tar -xz -C $HOME/clang-r596125
-          echo "$HOME/clang-r596125/bin" >> $GITHUB_PATH
-
-      - name: Verify Clang Version
+      - name: Verify Compiler Version
         run: |
           clang --version
-          ld.lld --version
+          aarch64-linux-gnu-gcc --version
 
       - name: Create Test Module Source (Fallback if folder not present)
         run: |
@@ -47,7 +41,7 @@ jobs:
           MODULE_DESCRIPTION("Moto G30 sm6225 Test Module");
 
           static int __init hello_init(void) {
-              pr_info("hello_test: modulo carregado via AOSP Clang 22.0.2!\n");
+              pr_info("hello_test: modulo carregado com sucesso!\n");
               return 0;
           }
 
@@ -66,13 +60,12 @@ jobs:
 
       - name: Prepare Kernel Headers & Build Module
         run: |
-          # Localiza o defconfig do caprip (Moto G30) na árvore
           DEFCONFIG=$(find arch/arm64/configs -name "*caprip*defconfig" | sed 's|arch/arm64/configs/||' | head -n 1)
           echo "Usando defconfig: $DEFCONFIG"
 
-          make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 $DEFCONFIG
-          make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 modules_prepare
-          make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 M=test_module modules
+          make O=out ARCH=arm64 CC=clang LD=ld.lld CROSS_COMPILE=aarch64-linux-gnu- $DEFCONFIG
+          make O=out ARCH=arm64 CC=clang LD=ld.lld CROSS_COMPILE=aarch64-linux-gnu- modules_prepare
+          make O=out ARCH=arm64 CC=clang LD=ld.lld CROSS_COMPILE=aarch64-linux-gnu- M=test_module modules
 
       - name: Upload Compiled .ko Artifact
         uses: actions/upload-artifact@v4
