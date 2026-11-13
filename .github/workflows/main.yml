@@ -1,4 +1,4 @@
-name: Build Kernel Module (Ubuntu Clang & GCC)
+name: Build LTO/CFI Kernel Module (Official Google AOSP Clang)
 
 on:
   workflow_dispatch:
@@ -17,15 +17,24 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Install Build Dependencies & Toolchain
+      - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison build-essential ccache curl flex git libelf-dev libssl-dev lld clang gcc-aarch64-linux-gnu
+          sudo apt-get install -y bc bison build-essential ccache curl flex git libelf-dev libssl-dev python3 lld
 
-      - name: Verify Compiler Version
+      - name: Setup Official Google AOSP Clang (r596125)
+        run: |
+          echo "Baixando toolchain oficial do Google (clang-r596125)..."
+          git clone --depth=1 --filter=blob:none --sparse https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 $HOME/aosp-clang
+          cd $HOME/aosp-clang
+          git sparse-checkout set clang-r596125
+          
+          # Adiciona o diretório bin do Clang oficial ao PATH do GitHub Actions
+          echo "$HOME/aosp-clang/clang-r596125/bin" >> $GITHUB_PATH
+
+      - name: Verify Official Clang Version
         run: |
           clang --version
-          aarch64-linux-gnu-gcc --version
 
       - name: Create Test Module Source (Fallback if folder not present)
         run: |
@@ -38,10 +47,10 @@ jobs:
 
           MODULE_LICENSE("GPL");
           MODULE_AUTHOR("djfjfjfjjf");
-          MODULE_DESCRIPTION("Moto G30 sm6225 Test Module");
+          MODULE_DESCRIPTION("Moto G30 sm6225 Official Clang LTO/CFI Test Module");
 
           static int __init hello_init(void) {
-              pr_info("hello_test: modulo carregado com sucesso!\n");
+              pr_info("hello_test: modulo compilado com AOSP Clang oficial carregado com sucesso!\n");
               return 0;
           }
 
@@ -58,18 +67,19 @@ jobs:
           EOF
           fi
 
-      - name: Prepare Kernel Headers & Build Module
+      - name: Prepare Kernel Headers & Build Module with LLVM
         run: |
           DEFCONFIG=$(find arch/arm64/configs -name "*caprip*defconfig" | sed 's|arch/arm64/configs/||' | head -n 1)
           echo "Usando defconfig: $DEFCONFIG"
 
-          make O=out ARCH=arm64 CC=clang LD=ld.lld CROSS_COMPILE=aarch64-linux-gnu- $DEFCONFIG
-          make O=out ARCH=arm64 CC=clang LD=ld.lld CROSS_COMPILE=aarch64-linux-gnu- modules_prepare
-          make O=out ARCH=arm64 CC=clang LD=ld.lld CROSS_COMPILE=aarch64-linux-gnu- M=test_module modules
+          # Compilação estrita com LLVM=1 e LLVM_IAS=1 usando o Clang oficial r596125 do Google
+          make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 $DEFCONFIG
+          make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 modules_prepare
+          make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 M=test_module modules
 
       - name: Upload Compiled .ko Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: moto-g30-kernel-module
+          name: moto-g30-official-clang-module
           path: out/test_module/*.ko
           if-no-files-found: error
