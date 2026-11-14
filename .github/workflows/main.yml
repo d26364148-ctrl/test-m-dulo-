@@ -1,13 +1,14 @@
-name: Build Moto G30 Kernel (Official Google AOSP Clang)
+name: Build LTO/CFI Kernel Module (Official Google AOSP Clang)
 
 on:
   workflow_dispatch:
   push:
-    paths-ignore:
-      - 'README.md'
+    paths:
+      - 'test_module/**'
+      - '.github/workflows/main.yml'
 
 jobs:
-  build-kernel:
+  build-module:
     runs-on: ubuntu-latest
 
     steps:
@@ -23,10 +24,17 @@ jobs:
 
       - name: Setup Official Google AOSP Clang (r596125)
         run: |
-          echo "Baixando toolchain oficial do Google (clang-r596125)..."
-          git clone --depth=1 --filter=blob:none --sparse https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 $HOME/aosp-clang
+          echo "Baixando toolchain oficial do Google (clang-r596125) na VM..."
+          rm -rf $HOME/aosp-clang
+          mkdir -p $HOME/aosp-clang
           cd $HOME/aosp-clang
-          git sparse-checkout set clang-r596125
+          
+          git init
+          git remote add origin https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86
+          git config core.sparseCheckout true
+          echo "clang-r596125" >> .git/info/sparse-checkout
+          
+          git pull origin main --depth 1
           
           echo "$HOME/aosp-clang/clang-r596125/bin" >> $GITHUB_PATH
 
@@ -34,27 +42,59 @@ jobs:
         run: |
           clang --version
 
-      - name: Configure Kernel for Moto G30 (caprip)
+      - name: Create Test Module Source (Fallback if folder not present)
         run: |
-          echo "Criando diretório out e combinando os arquivos de configuração..."
-          mkdir -p out
+          if [ ! -d "test_module" ]; then
+            mkdir -p test_module
+            cat << 'EOF' > test_module/hello_test.c
+          #include <linux/init.h>
+          #include <linux/module.h>
+          #include <linux/kernel.h>
+
+          MODULE_LICENSE("GPL");
+          MODULE_AUTHOR("djfjfjfjjf");
+          MODULE_DESCRIPTION("Moto G30 sm6225 Official Clang LTO/CFI Test Module");
+
+          static int __init hello_init(void) {
+              pr_info("hello_test: modulo compilado com AOSP Clang oficial carregado com sucesso!\n");
+              return 0;
+          }
+
+          static void __exit hello_exit(void) {
+              pr_info("hello_test: modulo finalizado.\n");
+          }
+
+          module_init(hello_init);
+          module_exit(hello_exit);
+          EOF
+
+            cat << 'EOF' > test_module/Makefile
+          obj-m += hello_test.o
+          EOF
+          fi
+
+      - name: Prepare Kernel Headers & Build Module with LLVM
+        run: |
+          echo "Procurando defconfig do bengal-perf..."
+          CONFIG_PATH=$(find arch/arm64/configs -name "bengal-perf_defconfig" -o -name "*bengal-perf*defconfig" | head -n 1)
           
-          cat arch/arm64/configs/vendor/bengal-perf_defconfig \
-              arch/arm64/configs/vendor/ext_config/moto-bengal.config \
-              arch/arm64/configs/vendor/ext_config/caprip-default.config \
-              arch/arm64/configs/vendor/debugfs.config > out/.config
+          if [ -z "$CONFIG_PATH" ]; then
+            echo "Erro crítico: Nenhum defconfig 'bengal-perf_defconfig' foi encontrado!"
+            find arch/arm64/configs -maxdepth 3
+            exit 1
+          fi
 
-          echo "Executando olddefconfig para sincronizar o .config..."
-          make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 olddefconfig
+          DEFCONFIG=$(echo "$CONFIG_PATH" | sed 's|arch/arm64/configs/||')
+          echo "Usando defconfig: $DEFCONFIG"
 
-      - name: Build Full Kernel Image with LLVM
-        run: |
-          echo "Iniciando a compilação do kernel (Image) limitada a 3 núcleos..."
-          make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 -j3
+          # Compilação estrita com LLVM=1 e LLVM_IAS=1 usando o Clang oficial r596125 do Google
+          make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 $DEFCONFIG
+          make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 modules_prepare
+          make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 M=test_module modules
 
-      - name: Upload Kernel Image Artifact
+      - name: Upload Compiled .ko Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: moto-g30-kernel-image
-          path: out/arch/arm64/boot/Image
+          name: moto-g30-official-clang-module
+          path: out/test_module/*.ko
           if-no-files-found: error
