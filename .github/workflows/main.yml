@@ -26,20 +26,15 @@ jobs:
         run: |
           echo "Baixando toolchain oficial do Google (clang-r596125) na VM..."
           rm -rf $HOME/aosp-clang
-          mkdir -p $HOME/aosp-clang
+          git clone --depth=1 --filter=blob:none --sparse https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 $HOME/aosp-clang
           cd $HOME/aosp-clang
-          
-          git init
-          git remote add origin https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86
-          git config core.sparseCheckout true
-          echo "clang-r596125" >> .git/info/sparse-checkout
-          
-          git pull origin main --depth 1
+          git sparse-checkout set clang-r596125
           
           echo "$HOME/aosp-clang/clang-r596125/bin" >> $GITHUB_PATH
 
       - name: Verify Official Clang Version
         run: |
+          export PATH="$HOME/aosp-clang/clang-r596125/bin:$PATH"
           clang --version
 
       - name: Create Test Module Source (Fallback if folder not present)
